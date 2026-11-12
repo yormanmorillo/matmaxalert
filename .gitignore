@@ -1,0 +1,33 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencias y build
+node_modules/
+.npm-cache/
+dist/
+dist-ssr/
+
+# Entorno y secretos (el .env real solo vive en el servidor, chmod 600)
+.env
+.env.*
+!.env.example
+
+# Backups y artefactos
+backups/
+*.tar.gz
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+._*
+*.suo
+*.sw?
+
+# Repo temporal creado por una herramienta externa
+.git-stale-*
