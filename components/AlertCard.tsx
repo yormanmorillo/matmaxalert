@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, AlertStatus, SOS_ALERT_TYPE, User } from '../types';
 import { WrenchScrewdriverIcon, MapPinIcon, ExclamationTriangleIcon, BoltIcon, BoxIcon, CogIcon } from '../constants';
 import { useAlerts } from '../hooks/useAlerts';
@@ -76,27 +76,56 @@ const AlertCard: React.FC<AlertCardProps> = ({ alert, actor }) => {
     && (alert.status === AlertStatus.ACTIVE || alert.status === AlertStatus.WORKING)
     && canManageSos);
 
+  const [isHolding, setIsHolding] = useState(false);
+  const holdTimerRef = useRef<number | null>(null);
+
+  const clearHold = () => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    setIsHolding(false);
+  };
+
+  // Un toque accidental no puede cerrar una alerta para siempre (backend no reabre).
+  // Para resolver hay que mantener presionado 800 ms, igual que en el watch.
+  const startHold = () => {
+    if (!isInteractive || isUpdating || alert.status !== AlertStatus.WORKING) return;
+    setIsHolding(true);
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      setIsHolding(false);
+      resolveAlert();
+    }, 800);
+  };
+
+  useEffect(() => () => {
+    if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
+  }, [alert.id, alert.status]);
+
+  const resolveAlert = async () => {
+    if (isUpdating) return;
+    setIsUpdating(true);
+    try {
+      const result = await updateAlertStatus(alert.id, AlertStatus.RESOLVED);
+      if (!result) toast.error('No se pudo resolver la alerta. Intenta de nuevo.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   const handleClick = async () => {
     if (!isInteractive || isUpdating) return;
+    // WORKING se resuelve con long-press, no con un toque.
+    if (alert.status !== AlertStatus.ACTIVE) return;
 
     setIsUpdating(true);
     try {
-      let nextStatus: AlertStatus | null = null;
       const updates: Partial<Alert> = {};
+      if (!alert.assignedTo && actor) updates.assignedTo = actor.username;
 
-      if (alert.status === AlertStatus.ACTIVE) {
-          nextStatus = AlertStatus.WORKING;
-          if (!alert.assignedTo && actor) {
-              updates.assignedTo = actor.username;
-          }
-      } else if (alert.status === AlertStatus.WORKING) {
-          nextStatus = AlertStatus.RESOLVED;
-      }
-
-      if (nextStatus) {
-          const result = await updateAlertStatus(alert.id, nextStatus, undefined, updates);
-          if (!result) toast.error('No se pudo actualizar la alerta. Intenta de nuevo.');
-      }
+      const result = await updateAlertStatus(alert.id, AlertStatus.WORKING, undefined, updates);
+      if (!result) toast.error('No se pudo atender la alerta. Intenta de nuevo.');
     } finally {
       setIsUpdating(false);
     }
@@ -110,15 +139,24 @@ const AlertCard: React.FC<AlertCardProps> = ({ alert, actor }) => {
   return (
     <div
         onClick={handleClick}
+        onPointerDown={startHold}
+        onPointerUp={clearHold}
+        onPointerLeave={clearHold}
+        onPointerCancel={clearHold}
+        onContextMenu={(event) => event.preventDefault()}
         role={isInteractive ? 'button' : undefined}
         tabIndex={isInteractive ? 0 : undefined}
         onKeyDown={(event) => {
           if (isInteractive && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
-            handleClick();
+            if (alert.status === AlertStatus.ACTIVE) {
+              handleClick();
+            } else if (alert.status === AlertStatus.WORKING && window.confirm('¿Resolver esta alerta?')) {
+              resolveAlert();
+            }
           }
         }}
-        aria-label={isInteractive ? `${alert.type} en ${displayPressName}: ${alert.status === AlertStatus.ACTIVE ? 'atender' : 'resolver'}` : undefined}
+        aria-label={isInteractive ? `${alert.type} en ${displayPressName}: ${alert.status === AlertStatus.ACTIVE ? 'atender' : 'mantener presionado para resolver'}` : undefined}
         className={`
             relative overflow-hidden rounded-lg border-2 ${style.card}
             ${isInteractive ? 'cursor-pointer active:brightness-95' : ''}
@@ -183,11 +221,15 @@ const AlertCard: React.FC<AlertCardProps> = ({ alert, actor }) => {
                  )}
                  {isInteractive && (
                      <span className={`text-xs font-bold ${isUrgent ? 'underline underline-offset-2' : 'text-primary-600 dark:text-primary-400'}`}>
-                         {alert.status === AlertStatus.ACTIVE ? 'Tocar para atender →' : 'Tocar para resolver →'}
+                         {alert.status === AlertStatus.ACTIVE ? 'Tocar para atender →' : 'Mantén presionado para resolver'}
                      </span>
                  )}
             </div>
         </div>
+
+        {isHolding && (
+            <div className="absolute bottom-0 left-0 h-1.5 bg-white/80 animate-hold-progress" />
+        )}
 
         {isUpdating && (
             <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-20">

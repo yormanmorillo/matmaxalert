@@ -129,11 +129,24 @@ docker exec alertool-mongodb-1 mongorestore --gzip --archive=/tmp/r.gz \
 - **Escrituras de kiosko**: nginx inyecta `X-Kiosk-Key` en `/api/alerts`; el
   backend rechaza escrituras directas (probado: 401 sin cabecera). El backend no
   está publicado al host.
-- **SOS**: solo `admin`/`supervisor` pueden pasar un SOS a `WORKING`/cerrarlo; la
-  sirena sigue hasta `RESOLVED`/`CANCELLED`.
+- **SOS**: solo `admin`/`supervisor` pueden cambiar estado, notas o `assignedTo`
+  de un SOS; un kiosko recibe 403. La sirena sigue hasta `RESOLVED`/`CANCELLED`.
 - **Cabeceras**: CSP, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` y
   `Permissions-Policy` en nginx.
-- **Rate limit**: login 10/15 min por IP+usuario; API 300/min por IP.
+- **Rate limit**: login 10/15 min; API 600/min; creación de alertas 120/min.
+  **Los SOS se saltan el límite** para que un 429 no impida una emergencia.
+- **Carga de alertas**: los kioskos piden activas + últimas 24 h; admin/supervisor
+  mantienen una ventana amplia para reportes.
+- **Confirmación táctil**: para resolver hay que mantener presionado 800 ms; un
+  toque accidental ya no cierra la alerta (el backend no permite reabrirla).
+- **SOS con reintento**: 3 intentos con backoff y botón explícito de reintento.
+- **Audio**: indicador `🔇 Activar sonido` / `🔊 Sonido activo`; el desbloqueo
+  real depende del gesto o de la política de kiosko de Chrome.
+- **Dependencias**: `npm audit --audit-level=high` en 0 para frontend y backend.
+- **CI**: `.github/workflows/ci.yml` ejecuta typecheck, build, tests de backend y
+  auditoría en cada push/PR.
+
+### Pendiente de seguridad (requiere decisión/ventana)
 
 ### Pendiente de seguridad (requiere decisión/ventana)
 
@@ -148,17 +161,22 @@ docker exec alertool-mongodb-1 mongorestore --gzip --archive=/tmp/r.gz \
    real, token por dispositivo/PIN de turno.
 5. **Socket.io**: el canal es de solo lectura y va tras nginx, pero no autentica
    el handshake; cualquiera en la LAN recibe el broadcast de alertas.
-6. **Tests/CI**: no hay suite automatizada; el workflow recomendado es
-   `npm run check` + E2E de los 5 portales en CI.
+6. **E2E visual**: hay CI con typecheck/build/tests de dominio, pero falta un
+   E2E automatizado de los 5 portales en cada despliegue.
 7. **Tipos de alerta estables**: `Alert.type` guarda el nombre visible. Renombrar
    se bloquea si hay alertas abiertas, pero lo definitivo es un `typeId` inmutable.
-8. **Reportes**: el cliente carga hasta 2000 alertas; para históricos grandes,
-   agregados y paginación en servidor.
+8. **Reportes**: admin/supervisor cargan hasta 2000 alertas; para históricos
+   grandes, agregados y paginación en servidor.
+9. **Sirena física**: el audio del navegador no es un sistema de seguridad
+   certificado; para emergencias reales, baliza/sirena por relé y paro cableado.
+10. **Kiosko de pared**: para que el audio arranque sin toque, usar Chrome con
+    `--kiosk --autoplay-policy=no-user-gesture-required` (ver `SECURITY.md`).
 
 ## Notas
 
 - La auditoría original y el registro de cambios están en
-  `AUDITORIA-ALERTOOL-2026-11-12.md` y `CAMBIOS-APLICADOS.md`.
+  `AUDITORIA-ALERTOOL-2026-11-12.md` y `CAMBIOS-APLICADOS.md`. El modelo de
+  amenaza y las recomendaciones de despliegue están en `SECURITY.md`.
 - `server.ts` (backend duplicado sin uso) y los restos de macOS fueron eliminados.
 - **Alertool no usa Supabase.** Los restos encontrados (`env.js`, una entrada
   `@supabase/supabase-js` en el importmap y un historial de prompts con claves de

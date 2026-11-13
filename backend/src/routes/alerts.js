@@ -6,6 +6,7 @@ const {
   authenticateKiosk,
   requireRole,
 } = require('../middleware/auth');
+const { ALERT_STATUSES, canTransition } = require('../domain/alertStatus');
 
 const router = express.Router();
 
@@ -13,16 +14,7 @@ const router = express.Router();
 let io;
 router.setIo = (socketIo) => { io = socketIo; };
 
-const VALID_STATUSES = ['ACTIVE', 'WORKING', 'RESOLVED', 'CANCELLED'];
 const SOS_TYPE = 'SOS';
-
-// Máquina de estados: solo se permite avanzar, nunca reabrir una alerta cerrada.
-const ALLOWED_TRANSITIONS = {
-  ACTIVE:   ['WORKING', 'CANCELLED'],
-  WORKING:  ['RESOLVED', 'CANCELLED'],
-  RESOLVED: [],
-  CANCELLED: [],
-};
 
 const normalizeStatus = (value) => String(value || '').toUpperCase();
 
@@ -32,12 +24,12 @@ const sanitizeText = (value, maxLength) =>
 // GET /api/alerts — paginación acotada y filtros validados
 router.get('/', async (req, res, next) => {
   try {
-    const { status, pressId, limit, startDate, endDate } = req.query;
+    const { status, pressId, limit, startDate, endDate, includeActive } = req.query;
     const filter = {};
 
     if (status) {
       const normalized = normalizeStatus(status);
-      if (!VALID_STATUSES.includes(normalized)) {
+      if (!ALERT_STATUSES.includes(normalized)) {
         return res.status(400).json({ message: 'status inválido' });
       }
       filter.status = normalized;
@@ -56,6 +48,16 @@ router.get('/', async (req, res, next) => {
         if (!Number.isFinite(to)) return res.status(400).json({ message: 'endDate inválido' });
         filter.timestamp.$lte = to;
       }
+    }
+
+    // Kioskos: activas + ventana reciente. Así una reconexión no descarga años
+    // de historial, pero una alerta ACTIVE antigua nunca desaparece.
+    if (includeActive === 'true' && filter.timestamp && !filter.status) {
+      filter.$or = [
+        { timestamp: filter.timestamp },
+        { status: { $in: ['ACTIVE', 'WORKING'] } },
+      ];
+      delete filter.timestamp;
     }
 
     // Sin límite explícito se devuelven las 2000 más recientes: evita que cada
@@ -149,6 +151,13 @@ router.patch('/:id', optionalAuth, authenticateKiosk, async (req, res, next) => 
     const current = await Alert.findById(req.params.id);
     if (!current) return res.status(404).json({ message: 'Alerta no encontrada' });
 
+    // Un SOS no lo puede tocar un kiosko: ni estado, ni notas, ni assignedTo.
+    if (current.type === SOS_TYPE && !['admin', 'supervisor'].includes(req.user?.role)) {
+      return res.status(403).json({
+        message: 'Solo un supervisor o administrador puede gestionar un SOS',
+      });
+    }
+
     const { status, notes, assignedTo } = req.body || {};
     const update = {};
     let statusChanged = false;
@@ -158,22 +167,14 @@ router.patch('/:id', optionalAuth, authenticateKiosk, async (req, res, next) => 
 
     if (status !== undefined) {
       const normalized = normalizeStatus(status);
-      if (!VALID_STATUSES.includes(normalized)) {
+      if (!ALERT_STATUSES.includes(normalized)) {
         return res.status(400).json({ message: 'Estado inválido' });
       }
 
       if (normalized !== current.status) {
-        const allowed = ALLOWED_TRANSITIONS[current.status] || [];
-        if (!allowed.includes(normalized)) {
+        if (!canTransition(current.status, normalized)) {
           return res.status(409).json({
             message: `Transición no permitida: ${current.status} → ${normalized}`,
-          });
-        }
-
-        // Una emergencia no la puede cerrar (ni "tomar") un kiosko anónimo.
-        if (current.type === SOS_TYPE && !['admin', 'supervisor'].includes(req.user?.role)) {
-          return res.status(403).json({
-            message: 'Solo un supervisor o administrador puede gestionar un SOS',
           });
         }
 

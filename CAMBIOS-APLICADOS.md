@@ -216,6 +216,39 @@ Backup                mongo-20261112-142038.gz (6.2 KB, 107 alertas)
 | **Reportes en servidor** | Con 107 alertas es suficiente | Agregados/paginación cuando crezca el histórico |
 | **Retención de alertas** | No se borra histórico | TTL/archivo de resueltas > N meses |
 
+
+---
+
+## 10. Segunda iteración — auditoría externa (13-nov-2026)
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| Clave de kiosko compartida (SOS/notas suplantables) | **Parcial** | Un SOS ya no se puede tocar sin `admin`/`supervisor` (403 en notas y estado, verificado). La clave sigue siendo compartida: requiere VLAN/lista de IPs o token por dispositivo. |
+| Sin HTTPS | **Pendiente** | Documentado en `SECURITY.md`; no se activa TLS sin CA instalada en los kioskos. |
+| Sirena puede no sonar | **Mitigado** | Indicador `🔇/🔊` en todas las pantallas + guía de Chrome kiosko. Sigue sin ser un sistema certificado; hace falta sirena física. |
+| Dependencias vulnerables | **Resuelto** | Backend de 10 (3 críticas) a **0**; frontend de 7 a **0**. Express 4.22.3, Mongoose 8.24.9, Socket.io 4.8.4, React Router 7.18.5 y overrides de `ws`/`qs`/`body-parser`/`proxy-addr`. |
+| 429 puede bloquear un SOS | **Resuelto** | Límite general 600/min; POST de alertas 120/min; **SOS exento**. Verificado: 120 POST → 404, el 121 → 429, SOS → 404 (no 429). |
+| Carga de 2000 alertas por reconexión | **Resuelto para kioskos** | Kioskos: activas + últimas 24 h (`includeActive`); admin/supervisor conservan 2000 para reportes. Verificado: 2 activas antiguas siguen visibles con 0 alertas en la ventana de 24 h. |
+| Usuarios admin/supervisor listados sin login | **Resuelto** | `GET /api/users` anónimo solo devuelve `technical`/`driver`/`press`. Verificado: `jose`, `driver1`; sin `admin`. |
+| Un toque resuelve la alerta | **Resuelto** | Resolver exige mantener presionado 800 ms; probado con una alerta temporal que pasó a `RESOLVED` solo con el long-press. |
+| SOS sin reintento | **Resuelto** | 3 intentos con backoff, refresco de estado y botón persistente "Reintentar SOS". Probado con POST abortado: aviso visible y 0 SOS creados. |
+| Sin tests/CI | **Resuelto** | `backend/test/alertStatus.test.js` (5 tests) + `.github/workflows/ci.yml` con typecheck, build, tests y `npm audit --audit-level=high`. |
+
+### Verificación de esta iteración
+
+```
+npm run check (frontend)                  OK
+npm test (backend)                        5/5
+npm audit --audit-level=high              frontend 0, backend 0
+GET /api/users anónimo                    jose, driver1 (sin admin/supervisor)
+GET alerts includeActive + 24h             2 activas antiguas, 0 en ventana
+PATCH SOS notas/estado sin JWT            403 (antes 200)
+POST 120 alertas / 121 / SOS              404 / 429 / 404 (SOS exento)
+Long-press en alerta WORKING              RESOLVED
+SOS con POST abortado                     aviso + reintento, 0 SOS creados
+Navegador (React Router 7)                home, login, admin, prensa y técnico sin errores
+```
+
 ---
 
 ## Rollback

@@ -7,12 +7,13 @@ interface AlertsResponse {
   total: number;
 }
 
-export const getAlerts = async (params?: { limit?: number; status?: string; startDate?: number; endDate?: number }): Promise<Alert[]> => {
+export const getAlerts = async (params?: { limit?: number; status?: string; startDate?: number; endDate?: number; includeActive?: boolean }): Promise<Alert[]> => {
   const query = new URLSearchParams();
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.status) query.set('status', params.status);
   if (params?.startDate) query.set('startDate', String(params.startDate));
   if (params?.endDate) query.set('endDate', String(params.endDate));
+  if (params?.includeActive) query.set('includeActive', 'true');
   const qs = query.toString();
 
   const data: AlertsResponse = await apiFetch(`/alerts${qs ? `?${qs}` : ''}`);

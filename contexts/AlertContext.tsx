@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { Alert, AlertStatus } from '../types';
 import { getAlerts, createAlert as createAlertInDb, updateAlert as updateAlertInDb } from '../services/alertService';
 import { normalizeId } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface AlertContextType {
   alerts: Alert[];
@@ -22,10 +23,14 @@ export const AlertContext = createContext<AlertContextType | undefined>(undefine
 // WebSocket URL — en dev el proxy de Vite (socket.io) redirige automáticamente
 const WS_URL = import.meta.env.VITE_WS_URL || undefined;
 
-// Ventana de historial que se carga en los paneles. El backend acota igualmente.
+// Admin/supervisor cargan una ventana amplia para reportes; los kioskos
+// cargan solo activas + últimas 24 h para no descargar años de historial.
 const ALERTS_WINDOW = 2000;
+const KIOSK_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  const isKioskSession = !user;
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loadingAlerts, setLoadingAlerts] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -38,7 +43,11 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const loadAlerts = useCallback(async () => {
     setLoadingAlerts(true);
     try {
-      const fetchedAlerts = await getAlerts({ limit: ALERTS_WINDOW });
+      const fetchedAlerts = await getAlerts(
+        isKioskSession
+          ? { startDate: Date.now() - KIOSK_WINDOW_MS, includeActive: true, limit: 1000 }
+          : { limit: ALERTS_WINDOW }
+      );
       setAlerts((prev) => {
         // Conservar solo las alertas optimistas aún no confirmadas; el resto
         // se reemplaza por la verdad del servidor (así desaparecen borradas).
@@ -52,7 +61,7 @@ export const AlertProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     } finally {
       setLoadingAlerts(false);
     }
-  }, []);
+  }, [isKioskSession]);
 
   useEffect(() => {
     loadAlerts();

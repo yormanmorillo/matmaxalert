@@ -107,7 +107,28 @@ app.use('/api/auth/login', rateLimit({
   keyGenerator: (req) => `${req.ip}:${String(req.body?.username || '').toLowerCase()}`,
   message: 'Demasiados intentos de inicio de sesión. Espera 15 minutos.',
 }));
-app.use('/api', rateLimit({ windowMs: 60_000, max: 300, prefix: 'api' }));
+// Cupo específico para crear alertas. Los SOS se saltan el límite: una
+// emergencia nunca debe quedarse sin enviar por un 429.
+const alertPostLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  prefix: 'alert-post',
+  skip: (req) => String(req.body?.type || '').toUpperCase() === 'SOS',
+});
+
+// Límite general más holgado para una planta con varios kioskos. Las
+// escrituras de alertas se contabilizan aparte (o no se limitan si son PATCH).
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  max: 600,
+  prefix: 'api',
+  skip: (req) => req.originalUrl.startsWith('/api/alerts')
+    && (req.method === 'POST' || req.method === 'PATCH'),
+}));
+
+app.use('/api/alerts', (req, res, next) => (
+  req.method === 'POST' ? alertPostLimiter(req, res, next) : next()
+));
 
 // ── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);

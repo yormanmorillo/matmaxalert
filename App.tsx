@@ -13,6 +13,7 @@ import { useAuth } from './hooks/useAuth';
 import WatchDashboard from './pages/WatchDashboard';
 import SosAlarmBanner from './components/SosAlarmBanner';
 import DataStateBanner from './components/DataStateBanner';
+import AudioStatusBadge from './components/AudioStatusBadge';
 
 const { HashRouter, Routes, Route, Navigate, Outlet, useLocation } = ReactRouterDOM;
 
@@ -75,6 +76,7 @@ const App: React.FC = () => {
     <HashRouter>
       <SosAlarmBanner />
       <DataStateBanner />
+      <AudioStatusBadge />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />

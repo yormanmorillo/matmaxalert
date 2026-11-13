@@ -19,8 +19,12 @@ router.get('/', optionalAuth, async (req, res, next) => {
       req.user.role === 'admin'
       || (req.user.role === 'supervisor' && (req.user.allowedSections || []).includes('users'))
     );
-    const users = await User.find().select(canSeeAll ? '-password' : PUBLIC_FIELDS).lean();
-    res.json(users);
+    // Sin sesión solo se listan los roles de kiosko: nunca admin/supervisor.
+    const KIOSK_ROLES = ['technical', 'driver', 'press'];
+    const query = canSeeAll
+      ? User.find().select('-password')
+      : User.find({ role: { $in: KIOSK_ROLES } }).select(PUBLIC_FIELDS);
+    res.json(await query.lean());
   } catch (err) { next(err); }
 });
 

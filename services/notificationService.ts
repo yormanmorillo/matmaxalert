@@ -9,15 +9,26 @@ const getAudioContext = () => {
     return audioContext;
 }
 
-export const unlockAudio = () => {
+export const unlockAudio = async (): Promise<boolean> => {
     try {
         const context = getAudioContext();
         if (context.state === 'suspended') {
-            context.resume().catch(() => {});
+            await context.resume();
         }
+        return context.state === 'running';
     } catch {
         // Sin gesto de usuario todavía: se reintenta en el próximo toque.
+        return false;
     }
+};
+
+/** Estado del audio para mostrar un indicador honesto en el kiosko. */
+export const getAudioState = (): 'unlocked' | 'locked' | 'unsupported' => {
+    if (typeof window === 'undefined') return 'unsupported';
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return 'unsupported';
+    if (!audioContext) return 'locked';
+    return audioContext.state === 'running' ? 'unlocked' : 'locked';
 };
 
 export const playNotificationSound = () => {

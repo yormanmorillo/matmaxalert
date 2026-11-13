@@ -10,7 +10,11 @@ const rateLimit = ({
   prefix = 'global',
   keyGenerator = (req) => req.ip,
   message = 'Demasiadas solicitudes. Intenta de nuevo en unos segundos.',
+  skip = () => false,
 } = {}) => (req, res, next) => {
+  // Un SOS nunca debe recibir 429: la comprobación va antes de contar.
+  if (skip(req)) return next();
+
   const now = Date.now();
   const key = `${prefix}:${keyGenerator(req) || 'unknown'}`;
   const current = buckets.get(key);

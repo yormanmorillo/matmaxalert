@@ -11,13 +11,15 @@ import { usePresses } from '../hooks/usePresses';
 
 const PressDashboard: React.FC = () => {
   const navigate = ReactRouterDOM.useNavigate();
-  const { createAlert, alerts, updateAlertStatus, loadingAlerts } = useAlerts();
+  const { createAlert, alerts, updateAlertStatus, loadingAlerts, refreshAlerts } = useAlerts();
   const { presses } = usePresses();
   const { buttonConfigs, loadingConfigs } = useAlertConfig();
   
   const [selectedPressId, setSelectedPressId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [isHoldingSos, setIsHoldingSos] = useState(false);
+  const [isSendingSos, setIsSendingSos] = useState(false);
+  const [sosError, setSosError] = useState<string | null>(null);
   const sosHoldTimerRef = useRef<number | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
 
@@ -98,17 +100,46 @@ const PressDashboard: React.FC = () => {
   // SOS: hold 1s to trigger (fast but deliberate), broadcast to every panel
   const SOS_HOLD_MS = 1000;
 
+  // Reintento con backoff: un fallo de red no puede dejar el SOS sin enviar.
   const triggerSos = async () => {
-    if (!selectedPressId || sosActiveOnPress) return;
-    const result = await createAlert(SOS_ALERT_TYPE, selectedPressId, '¡EMERGENCIA! Requiere atención inmediata', 'Operador de Prensa');
-    setFeedbackMessage(result
-      ? { type: 'success', text: '¡SOS ACTIVADO! Todos los paneles notificados' }
-      : { type: 'error', text: 'Error al activar el SOS' });
-    scheduleFeedbackClear(3000);
+    if (!selectedPressId || sosActiveOnPress || isSendingSos) return;
+
+    setIsSendingSos(true);
+    setSosError(null);
+    let result: Awaited<ReturnType<typeof createAlert>> = null;
+
+    for (let attempt = 1; attempt <= 3 && !result; attempt += 1) {
+      result = await createAlert(
+        SOS_ALERT_TYPE,
+        selectedPressId,
+        '¡EMERGENCIA! Requiere atención inmediata',
+        'Operador de Prensa'
+      );
+      if (!result && attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+      }
+    }
+
+    setIsSendingSos(false);
+
+    if (result) {
+      setSosError(null);
+      setFeedbackMessage({ type: 'success', text: '¡SOS ACTIVADO! Todos los paneles notificados' });
+      scheduleFeedbackClear(3000);
+    } else {
+      // Puede que el SOS sí se haya creado y se perdiera la respuesta:
+      // refrescamos por si aparece activo.
+      refreshAlerts();
+      setSosError('No se pudo confirmar el SOS. Comprueba la conexión y reintenta.');
+    }
   };
 
+  useEffect(() => {
+    if (sosActiveOnPress) setSosError(null);
+  }, [sosActiveOnPress]);
+
   const handleSosHoldStart = () => {
-    if (sosActiveOnPress) return;
+    if (sosActiveOnPress || isSendingSos) return;
     setIsHoldingSos(true);
     sosHoldTimerRef.current = window.setTimeout(() => {
       sosHoldTimerRef.current = null;
@@ -195,26 +226,46 @@ const PressDashboard: React.FC = () => {
             onPointerLeave={handleSosHoldEnd}
             onPointerCancel={handleSosHoldEnd}
             onContextMenu={(e) => e.preventDefault()}
-            disabled={sosActiveOnPress}
+            disabled={sosActiveOnPress || isSendingSos}
             style={{ touchAction: 'none' }}
             className={`
                 relative w-full overflow-hidden rounded-lg border-2 py-5 select-none
                 flex flex-col items-center justify-center gap-1 transition-all
                 ${sosActiveOnPress
                     ? 'bg-red-800 border-red-900 text-white cursor-not-allowed animate-pulse'
-                    : 'bg-red-600 border-red-700 text-white hover:bg-red-500 active:scale-[0.99] cursor-pointer'}
+                    : isSendingSos
+                        ? 'bg-red-700 border-red-800 text-white cursor-wait'
+                        : 'bg-red-600 border-red-700 text-white hover:bg-red-500 active:scale-[0.99] cursor-pointer'}
             `}
         >
             {isHoldingSos && (
                 <div className="absolute bottom-0 left-0 h-2 bg-white animate-hold-progress" style={{ animationDuration: `${SOS_HOLD_MS}ms` }} />
             )}
             <span className="text-3xl font-extrabold uppercase tracking-widest">
-                {sosActiveOnPress ? '🚨 SOS Activo' : '🚨 SOS'}
+                {sosActiveOnPress ? '🚨 SOS Activo' : isSendingSos ? 'Enviando SOS…' : '🚨 SOS'}
             </span>
             <span className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                {sosActiveOnPress ? 'Emergencia reportada — todos los paneles notificados' : 'Mantener presionado 1 segundo para alertar a toda la planta'}
+                {sosActiveOnPress
+                    ? 'Emergencia reportada — todos los paneles notificados'
+                    : isSendingSos
+                        ? 'Confirmando con el servidor, no sueltes la pantalla'
+                        : 'Mantener presionado 1 segundo para alertar a toda la planta'}
             </span>
         </button>
+
+        {sosError && !sosActiveOnPress && (
+            <div role="alert" className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/30 dark:border-red-700">
+                <span className="text-sm font-semibold text-red-800 dark:text-red-200">{sosError}</span>
+                <button
+                    type="button"
+                    onClick={triggerSos}
+                    disabled={isSendingSos}
+                    className="flex-shrink-0 px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-bold disabled:opacity-60"
+                >
+                    {isSendingSos ? 'Reintentando…' : 'Reintentar SOS'}
+                </button>
+            </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             
